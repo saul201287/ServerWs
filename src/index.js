@@ -1,121 +1,80 @@
-const WebSocket = require("ws");
-const mqtt = require("mqtt");
+const express = require("express");
 const http = require("http");
+const { Server } = require("socket.io");
+const mqtt = require("mqtt");
 
-const WS_PORT = 8090;
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: ["*"],
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
 const MQTT_BROKER_URL = "mqtt://174.129.39.244:1883";
 
-const server = http.createServer((req, res) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "*",
-    "http://localhost:5173",
-    "http://localhost:5173/"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept"
-  );
-  res.end();
+// 🚀 Conectar con RabbitMQ vía MQTT
+const mqttClient = mqtt.connect(MQTT_BROKER_URL);
+
+mqttClient.on("connect", () => {
+  console.log("✅ Conectado a RabbitMQ (MQTT)");
+
+  mqttClient.subscribe("prueba.alerta", (err) => {
+    if (!err) console.log("📡 Suscrito a prueba.alerta");
+  });
+
+  mqttClient.subscribe("prueba.control", (err) => {
+    if (!err) console.log("📡 Suscrito a prueba.control");
+  });
 });
 
-const wss = new WebSocket.Server({ server });
+mqttClient.on("message", (topic, message) => {
+  const msg = message.toString();
+  console.log(`📥 [${topic}] ${msg}`);
 
-const clients = {
-  "/alertas": new Set(),
-  "/controles": new Set(),
-};
+  if (topic === "prueba.alerta") {
+    io.to("alertas").emit("alerta", msg);
+  } else if (topic === "prueba.control") {
+    io.to("controles").emit("control", msg);
+  }
+});
 
-wss.on("connection", (ws) => {
-  console.log("Cliente WebSocket conectado");
+mqttClient.on("error", (error) => {
+  console.error("❌ Error MQTT:", error);
+});
 
-  ws.on("message", (message) => {
-    const msg = message.toString();
-    console.log(`Mensaje recibido del cliente: ${msg}`);
+// 🧠 Manejamos conexiones de clientes con socket.io
+io.on("connection", (socket) => {
+  console.log("🟢 Cliente conectado:", socket.id);
 
-    try {
-      const jsonMsg = JSON.parse(msg);
+  socket.emit("connected", "Conectado al servidor Socket.IO");
 
-      if (jsonMsg.type === "auth") {
-        console.log("Autenticación recibida con token:", jsonMsg.token);
-        // Here you would validate the token
-        // For now, we'll just subscribe them to alertas by default
-        clients["/alertas"].add(ws);
-        ws.send("Autenticado y suscrito a /alertas");
-      } else if (jsonMsg.subscribe) {
-        const topic = jsonMsg.subscribe;
-        if (clients[topic]) {
-          clients[topic].add(ws);
-          ws.send(`Suscrito a ${topic}`);
-        } else {
-          ws.send(`Tema no válido: ${topic}`);
-        }
-      }
-    } catch (e) {
-      if (msg === "subscribe:/alertas") {
-        clients["/alertas"].add(ws);
-        ws.send("Suscrito a /alertas");
-      } else if (msg === "subscribe:/controles") {
-        clients["/controles"].add(ws);
-        ws.send("Suscrito a /controles");
-      } else {
-        ws.send(`Eco: ${msg}`);
-      }
+  socket.on("auth", (token) => {
+    console.log("🔐 Token recibido:", token);
+    // Aquí validarías el token si lo deseas
+    socket.join("alertas"); // Ejemplo: unirlo a la sala "alertas"
+    socket.emit("subscribed", "Suscrito a alertas por defecto");
+  });
+
+  socket.on("subscribe", (room) => {
+    if (["alertas", "controles"].includes(room)) {
+      socket.join(room);
+      socket.emit("subscribed", `Te suscribiste a ${room}`);
+      console.log(`📥 Cliente ${socket.id} suscrito a ${room}`);
+    } else {
+      socket.emit("error", `Sala inválida: ${room}`);
     }
   });
 
-  ws.on("close", () => {
-    console.log("Cliente WebSocket desconectado");
-    clients["/alertas"].delete(ws);
-    clients["/controles"].delete(ws);
+  socket.on("disconnect", () => {
+    console.log("🔴 Cliente desconectado:", socket.id);
   });
-
-  ws.send("Conectado al servidor WebSocket. Por favor suscríbase a un tema.");
 });
 
-function setupMQTTConsumer() {
-  const client = mqtt.connect(MQTT_BROKER_URL);
-
-  client.on("connect", () => {
-    console.log("Conectado al broker MQTT de RabbitMQ");
-
-    client.subscribe("prueba.alerta", (err) => {
-      if (!err) console.log("Suscrito a prueba.alerta");
-      else console.error("Error al suscribirse a prueba.alerta:", err);
-    });
-
-    client.subscribe("prueba.control", (err) => {
-      if (!err) console.log("Suscrito a prueba.control");
-      else console.error("Error al suscribirse a prueba.control:", err);
-    });
-  });
-
-  client.on("message", (topic, message) => {
-    const msgString = message.toString();
-    console.log(`Mensaje MQTT recibido en ${topic}: ${msgString}`);
-
-    if (topic === "prueba.alerta") {
-      clients["/alertas"].forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(`Alerta: ${msgString}`);
-        }
-      });
-    } else if (topic === "prueba.control") {
-      clients["/controles"].forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(`Control: ${msgString}`);
-        }
-      });
-    }
-  });
-
-  client.on("error", (error) => {
-    console.error("Error en MQTT:", error);
-  });
-}
-
-server.listen(WS_PORT, () => {
-  console.log(`Servidor WebSocket corriendo en ws://0.0.0.0:${WS_PORT}`);
+// 🚀 Iniciar servidor
+const PORT = 8090;
+server.listen(PORT, () => {
+  console.log(`🚀 Servidor Socket.IO en http://localhost:${PORT}`);
 });
-
-setupMQTTConsumer();
