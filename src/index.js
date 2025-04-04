@@ -6,7 +6,12 @@ const WS_PORT = 8090;
 const MQTT_BROKER_URL = "mqtt://174.129.39.244:1883";
 
 const server = http.createServer((req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "*",
+    "http://localhost:5173",
+    "http://localhost:5173/"
+  );
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept"
@@ -29,7 +34,6 @@ wss.on("connection", (ws) => {
     console.log(`Mensaje recibido del cliente: ${msg}`);
 
     try {
-      // Try to parse as JSON first (for your front-end format)
       const jsonMsg = JSON.parse(msg);
 
       if (jsonMsg.type === "auth") {
@@ -48,7 +52,6 @@ wss.on("connection", (ws) => {
         }
       }
     } catch (e) {
-      // If not JSON, handle as plain text (original format)
       if (msg === "subscribe:/alertas") {
         clients["/alertas"].add(ws);
         ws.send("Suscrito a /alertas");
@@ -67,7 +70,6 @@ wss.on("connection", (ws) => {
     clients["/controles"].delete(ws);
   });
 
-  // Send welcome message
   ws.send("Conectado al servidor WebSocket. Por favor suscríbase a un tema.");
 });
 
@@ -112,10 +114,8 @@ function setupMQTTConsumer() {
   });
 }
 
-// Start the server
 server.listen(WS_PORT, () => {
   console.log(`Servidor WebSocket corriendo en ws://0.0.0.0:${WS_PORT}`);
 });
 
-// Setup MQTT consumer
 setupMQTTConsumer();
