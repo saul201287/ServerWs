@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["*"],
+    origin: ["*", "http://localhost:5173/", "http://localhost:5173"],
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -15,7 +15,6 @@ const io = new Server(server, {
 
 const MQTT_BROKER_URL = "mqtt://174.129.39.244:1883";
 
-// 🚀 Conectar con RabbitMQ vía MQTT
 const mqttClient = mqtt.connect(MQTT_BROKER_URL);
 
 mqttClient.on("connect", () => {
@@ -50,13 +49,6 @@ io.on("connection", (socket) => {
   console.log("🟢 Cliente conectado:", socket.id);
 
   socket.emit("connected", "Conectado al servidor Socket.IO");
-
-  socket.on("auth", (token) => {
-    console.log("🔐 Token recibido:", token);
-    // Aquí validarías el token si lo deseas
-    socket.join("alertas"); // Ejemplo: unirlo a la sala "alertas"
-    socket.emit("subscribed", "Suscrito a alertas por defecto");
-  });
 
   socket.on("subscribe", (room) => {
     if (["alertas", "controles"].includes(room)) {
