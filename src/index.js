@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["*", "http://localhost:5173/", "http://localhost:5173"],
+    origin: ["*", "http://localhost:5173"],
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -16,6 +16,10 @@ const io = new Server(server, {
 const MQTT_BROKER_URL = "mqtt://174.129.39.244:1883";
 
 const mqttClient = mqtt.connect(MQTT_BROKER_URL);
+
+// Almacenar sockets suscritos a cada tipo de evento
+const alertaSubscribers = new Set();
+const controlSubscribers = new Set();
 
 mqttClient.on("connect", () => {
   console.log("✅ Conectado a RabbitMQ (MQTT)");
@@ -34,9 +38,9 @@ mqttClient.on("message", (topic, message) => {
   console.log(`📥 [${topic}] ${msg}`);
 
   if (topic === "prueba.alerta") {
-    io.to("alertas").emit("alerta", msg);
+    alertaSubscribers.forEach((socket) => socket.emit("alerta", msg));
   } else if (topic === "prueba.control") {
-    io.to("controles").emit("control", msg);
+    controlSubscribers.forEach((socket) => socket.emit("control", msg));
   }
 });
 
@@ -44,23 +48,26 @@ mqttClient.on("error", (error) => {
   console.error("❌ Error MQTT:", error);
 });
 
-// 🧠 Manejamos conexiones de clientes con socket.io
 io.on("connection", (socket) => {
   console.log("🟢 Cliente conectado:", socket.id);
 
   socket.emit("connected", "Conectado al servidor Socket.IO");
 
-  socket.on("subscribe", (room) => {
-    if (["alertas", "controles"].includes(room)) {
-      socket.join(room);
-      socket.emit("subscribed", `Te suscribiste a ${room}`);
-      console.log(`📥 Cliente ${socket.id} suscrito a ${room}`);
-    } else {
-      socket.emit("error", `Sala inválida: ${room}`);
-    }
+  socket.on("subscribe_alerta", () => {
+    alertaSubscribers.add(socket);
+    socket.emit("subscribed", "Te suscribiste al canal alerta");
+    console.log(`📥 Cliente ${socket.id} suscrito a ALERTA`);
+  });
+
+  socket.on("subscribe_control", () => {
+    controlSubscribers.add(socket);
+    socket.emit("subscribed", "Te suscribiste al canal control");
+    console.log(`📥 Cliente ${socket.id} suscrito a CONTROL`);
   });
 
   socket.on("disconnect", () => {
+    alertaSubscribers.delete(socket);
+    controlSubscribers.delete(socket);
     console.log("🔴 Cliente desconectado:", socket.id);
   });
 });
