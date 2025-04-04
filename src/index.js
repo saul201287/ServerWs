@@ -1,10 +1,20 @@
 const WebSocket = require("ws");
 const mqtt = require("mqtt");
+const http = require("http");
 
 const WS_PORT = 8090;
 const MQTT_BROKER_URL = "mqtt://174.129.39.244:1883";
 
-const wss = new WebSocket.Server({ port: WS_PORT });
+const server = http.createServer((req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept"
+  );
+  res.end();
+});
+
+const wss = new WebSocket.Server({ server });
 
 const clients = {
   "/alertas": new Set(),
@@ -18,14 +28,36 @@ wss.on("connection", (ws) => {
     const msg = message.toString();
     console.log(`Mensaje recibido del cliente: ${msg}`);
 
-    if (msg === "subscribe:/alertas") {
-      clients["/alertas"].add(ws);
-      ws.send("Suscrito a /alertas");
-    } else if (msg === "subscribe:/controles") {
-      clients["/controles"].add(ws);
-      ws.send("Suscrito a /controles");
-    } else {
-      ws.send(`Eco: ${msg}`);
+    try {
+      // Try to parse as JSON first (for your front-end format)
+      const jsonMsg = JSON.parse(msg);
+
+      if (jsonMsg.type === "auth") {
+        console.log("Autenticación recibida con token:", jsonMsg.token);
+        // Here you would validate the token
+        // For now, we'll just subscribe them to alertas by default
+        clients["/alertas"].add(ws);
+        ws.send("Autenticado y suscrito a /alertas");
+      } else if (jsonMsg.subscribe) {
+        const topic = jsonMsg.subscribe;
+        if (clients[topic]) {
+          clients[topic].add(ws);
+          ws.send(`Suscrito a ${topic}`);
+        } else {
+          ws.send(`Tema no válido: ${topic}`);
+        }
+      }
+    } catch (e) {
+      // If not JSON, handle as plain text (original format)
+      if (msg === "subscribe:/alertas") {
+        clients["/alertas"].add(ws);
+        ws.send("Suscrito a /alertas");
+      } else if (msg === "subscribe:/controles") {
+        clients["/controles"].add(ws);
+        ws.send("Suscrito a /controles");
+      } else {
+        ws.send(`Eco: ${msg}`);
+      }
     }
   });
 
@@ -34,9 +66,10 @@ wss.on("connection", (ws) => {
     clients["/alertas"].delete(ws);
     clients["/controles"].delete(ws);
   });
-});
 
-console.log(`Servidor WebSocket corriendo en ws://localhost:${WS_PORT}`);
+  // Send welcome message
+  ws.send("Conectado al servidor WebSocket. Por favor suscríbase a un tema.");
+});
 
 function setupMQTTConsumer() {
   const client = mqtt.connect(MQTT_BROKER_URL);
@@ -79,4 +112,10 @@ function setupMQTTConsumer() {
   });
 }
 
+// Start the server
+server.listen(WS_PORT, () => {
+  console.log(`Servidor WebSocket corriendo en ws://0.0.0.0:${WS_PORT}`);
+});
+
+// Setup MQTT consumer
 setupMQTTConsumer();
